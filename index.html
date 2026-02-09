@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nikal Lodey</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@700&display=swap');
+
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: radial-gradient(circle at center, #ff0055, #000000);
+    font-family: 'Roboto Mono', monospace;
+    color: #fff;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  h1 {
+    font-size: 3rem;
+    text-align: center;
+    animation: shake 0.5s infinite;
+    user-select: none;
+  }
+
+  @keyframes shake {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    20% { transform: translate(-5px, 5px) rotate(-5deg); }
+    40% { transform: translate(5px, -5px) rotate(5deg); }
+    60% { transform: translate(-5px, 5px) rotate(-5deg); }
+    80% { transform: translate(5px, -5px) rotate(5deg); }
+    100% { transform: translate(0, 0) rotate(0deg); }
+  }
+
+  .popcorn {
+    position: absolute;
+    font-size: 1.5rem;
+    animation: floatUp 2s forwards;
+  }
+
+  @keyframes floatUp {
+    0% { opacity: 1; transform: translateY(0) rotate(0deg); }
+    100% { opacity: 0; transform: translateY(-200px) rotate(360deg); }
+  }
+</style>
+</head>
+<body>
+
+<h1 id="mainText">HELLO 😆😆</h1>
+
+<audio id="bgMusic" src="goo-goo-gagaaa.mp3" loop></audio>
+
+<script>
+  const mainText = document.getElementById('mainText');
+  const music = document.getElementById('bgMusic');
+
+  // Attempt to autoplay music
+  window.addEventListener('DOMContentLoaded', () => {
+    music.volume = 0.5;
+    music.play().catch(() => {
+      console.log("Autoplay blocked, click anywhere to start music");
+    });
+  });
+
+  // Click anywhere to start music if autoplay blocked
+  document.body.addEventListener('click', () => {
+    music.play();
+  }, { once: true });
+
+  // Click the text to spawn popcorn emojis
+  mainText.addEventListener('click', (e) => {
+    for (let i = 0; i < 20; i++) {
+      const span = document.createElement('span');
+      span.className = 'popcorn';
+      span.textContent = '🍿';
+      span.style.left = `${Math.random() * window.innerWidth}px`;
+      span.style.top = `${window.innerHeight}px`;
+      span.style.fontSize = `${Math.random() * 30 + 20}px`;
+      document.body.appendChild(span);
+      setTimeout(() => span.remove(), 2000);
+    }
+    e.stopPropagation(); // don't trigger body click
+  });
+
+  // Random text color flicker
+  setInterval(() => {
+    mainText.style.color = `hsl(${Math.random() * 360}, 100%, 70%)`;
+  }, 300);
+</script>
+
+</body>
+</html>
