@@ -11,13 +11,14 @@
     margin: 0;
     height: 100vh;
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
     background: radial-gradient(circle at center, #ff0055, #000000);
     font-family: 'Roboto Mono', monospace;
     color: #fff;
     overflow: hidden;
-    cursor: pointer;
+    cursor: default;
   }
 
   h1 {
@@ -25,6 +26,7 @@
     text-align: center;
     animation: shake 0.5s infinite;
     user-select: none;
+    margin: 20px 0;
   }
 
   @keyframes shake {
@@ -46,30 +48,43 @@
     0% { opacity: 1; transform: translateY(0) rotate(0deg); }
     100% { opacity: 0; transform: translateY(-200px) rotate(360deg); }
   }
+
+  #luckButton {
+    padding: 15px 30px;
+    font-size: 1.5rem;
+    font-weight: bold;
+    background-color: #00ff88;
+    color: #000;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: transform 0.2s, background-color 0.2s;
+  }
+
+  #luckButton:hover {
+    transform: scale(1.1);
+    background-color: #00cc66;
+  }
 </style>
 </head>
 <body>
 
 <h1 id="mainText">HELLO 😆😆</h1>
+<button id="luckButton">Press here for GOOD LUCK 🍀</button>
 
 <audio id="bgMusic" src="goo-goo-gagaaa.mp3" loop></audio>
 
 <script>
   const mainText = document.getElementById('mainText');
   const music = document.getElementById('bgMusic');
+  const luckButton = document.getElementById('luckButton');
 
-  // Attempt to autoplay music
-  window.addEventListener('DOMContentLoaded', () => {
+  // When user clicks the button, start music
+  luckButton.addEventListener('click', () => {
     music.volume = 0.5;
-    music.play().catch(() => {
-      console.log("Autoplay blocked, click anywhere to start music");
-    });
+    music.play().catch(() => console.log("Autoplay blocked"));
+    luckButton.style.display = 'none'; // hide button after click
   });
-
-  // Click anywhere to start music if autoplay blocked
-  document.body.addEventListener('click', () => {
-    music.play();
-  }, { once: true });
 
   // Click the text to spawn popcorn emojis
   mainText.addEventListener('click', (e) => {
@@ -83,7 +98,7 @@
       document.body.appendChild(span);
       setTimeout(() => span.remove(), 2000);
     }
-    e.stopPropagation(); // don't trigger body click
+    e.stopPropagation();
   });
 
   // Random text color flicker
