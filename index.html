@@ -41,11 +41,26 @@
         #credits-banner { position: fixed; bottom: 10px; width: 100%; text-align: center; color: rgba(255,255,255,0.4); font-size: 11px; z-index: 100; pointer-events: none; letter-spacing: 1px; text-shadow: 0 1px 4px rgba(0,0,0,0.8); }
         #credits-banner span { color: #7fdb8a; font-weight: 700; }
 
-        #spawn-effect { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, rgba(127,219,138,0.4) 0%, transparent 80%); pointer-events: none; opacity: 0; transition: opacity 0.5s; z-index: 998; mix-blend-mode: screen; }
-        #spawn-effect.active { opacity: 1; animation: spawnPulse 3s ease-out forwards; }
-        @keyframes spawnPulse { 0% { transform: scale(0.1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } 100% { transform: scale(3); opacity: 0; } }
+        #spawn-effect { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, rgba(255,100,50,0.6) 0%, transparent 70%); pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 998; mix-blend-mode: screen; }
+        #spawn-effect.active { opacity: 1; animation: meteorFall 2s ease-out forwards; }
+        @keyframes meteorFall { 0% { transform: scale(0.1); opacity: 1; background: radial-gradient(circle, rgba(255,200,100,0.8) 0%, transparent 50%); } 30% { background: radial-gradient(circle, rgba(255,150,50,0.6) 0%, transparent 60%); } 70% { background: radial-gradient(circle, rgba(255,80,30,0.5) 0%, transparent 70%); } 100% { transform: scale(3); opacity: 0; background: radial-gradient(circle, rgba(127,219,138,0.3) 0%, transparent 80%); } }
 
         body.spawning #ui, body.spawning #controls, body.spawning #minimap { opacity: 0; }
+        
+        /* Mobile Controls */
+        #mobile-controls { display: none; position: fixed; bottom: 0; left: 0; right: 0; padding: 20px; z-index: 100; pointer-events: none; }
+        @media (max-width: 768px), (pointer: coarse) {
+            #mobile-controls { display: flex; justify-content: space-between; align-items: flex-end; }
+            #controls, #minimap { display: none; }
+        }
+        .mobile-btn { width: 60px; height: 60px; background: rgba(255,255,255,0.15); border: 2px solid rgba(127,219,138,0.5); border-radius: 50%; pointer-events: auto; backdrop-filter: blur(5px); }
+        .mobile-btn:active { background: rgba(127,219,138,0.4); }
+        .mobile-dpad { display: grid; grid-template-columns: repeat(3, 50px); gap: 5px; }
+        .mobile-dpad .mobile-btn { width: 50px; height: 50px; }
+        .mobile-actions { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+        .mobile-action-btn { width: 70px; height: 70px; border-radius: 50%; }
+        .mobile-action-btn.jump { background: rgba(127,219,138,0.3); }
+        .mobile-action-btn.sprint { background: rgba(255,150,50,0.3); }
     </style>
 </head>
 <body>
@@ -73,6 +88,23 @@
     <div id="minimap"><canvas id="minimap-canvas" width="150" height="150"></canvas></div>
     
     <div id="credits-banner">This prototype was made by <span>Manik Magar</span> and <span>Aadarsha K.C</span> with HTML, CSS, JS and THREE.JS</div>
+ 
+    <div id="mobile-controls">
+        <div class="mobile-dpad">
+            <div></div>
+            <button class="mobile-btn" id="btn-w">W</button>
+            <div></div>
+            <button class="mobile-btn" id="btn-a">A</button>
+            <div></div>
+            <button class="mobile-btn" id="btn-d">D</button>
+            <div></div>
+            <button class="mobile-btn" id="btn-s">S</button>
+        </div>
+        <div class="mobile-actions">
+            <button class="mobile-btn mobile-action-btn sprint" id="btn-shift">SPRINT</button>
+            <button class="mobile-btn mobile-action-btn jump" id="btn-space">JUMP</button>
+        </div>
+    </div>
 
     <div id="spawn-effect"></div>
 
@@ -204,12 +236,14 @@
             scene.fog = new THREE.FogExp2(0x7ec0ee, 0.005);
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.2;
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
             document.body.appendChild(renderer.domElement);
 
             createLighting();
@@ -219,12 +253,35 @@
             createFireflies();
             
             playerModelData = createPlayerModel();
-            createSpawnAltar();
+            // createSpawnAltar();
             createMobs();
 
             setupEvents();
             initMinimap();
-            forceLoadChunks(0, 0);
+            forceLoadChunks(Math.floor(CONFIG.spawnPoint.x / CONFIG.chunkSize), Math.floor(CONFIG.spawnPoint.z / CONFIG.chunkSize));
+            
+            // Generate random spawn point avoiding mountains and water
+            let validSpawn = false;
+            let attempts = 0;
+            while (!validSpawn && attempts < 100) {
+                const sx = (Math.random() - 0.5) * 200;
+                const sz = (Math.random() - 0.5) * 200;
+                const height = getTerrainHeight(sx, sz);
+                // Spawn between water level + 2 and height < 50 (avoid mountains and water)
+                if (height > CONFIG.waterLevel + 2 && height < 50) {
+                    CONFIG.spawnPoint = { x: sx, z: sz };
+                    validSpawn = true;
+                }
+                attempts++;
+            }
+            // Fallback if no valid spot found
+            if (!validSpawn) {
+                CONFIG.spawnPoint = { x: 30, z: 30 };
+            }
+            
+            // Set initial spawn position (will be assembled from falling parts)
+            const spawnHeight = getTerrainHeight(CONFIG.spawnPoint.x, CONFIG.spawnPoint.z);
+            player.position.set(CONFIG.spawnPoint.x, spawnHeight, CONFIG.spawnPoint.z);
 
             setTimeout(() => {
                 document.getElementById('loading').classList.add('hidden');
@@ -649,7 +706,27 @@
             const types = ['bear', 'deer', 'fox'];
             for (let i = 0; i < 20; i++) {
                 const animal = createAnimal(types[i % 3]);
-                animal.mesh.position.set((Math.random()-0.5)*150, 10, (Math.random()-0.5)*150); 
+                // Spawn on land only, not in water or mountains
+                let validPos = false;
+                let attempts = 0;
+                let mx, mz, my;
+                while (!validPos && attempts < 50) {
+                    mx = (Math.random() - 0.5) * 150;
+                    mz = (Math.random() - 0.5) * 150;
+                    my = getTerrainHeight(mx, mz);
+                    // Only spawn on land above water and below high mountains
+                    if (my > CONFIG.waterLevel + 1 && my < 70) {
+                        validPos = true;
+                    }
+                    attempts++;
+                }
+                // Fallback if no valid position found
+                if (!validPos) {
+                    mx = (Math.random() - 0.5) * 150;
+                    mz = (Math.random() - 0.5) * 150;
+                    my = getTerrainHeight(mx, mz);
+                }
+                animal.mesh.position.set(mx, my + 0.1, mz); 
                 scene.add(animal.mesh);
                 mobs.push({ mesh: animal.mesh, legs: animal.legs, targetAngle: Math.random() * Math.PI * 2, stateTimer: 0, speed: animal.speed, walkCycle: 0 });
             }
@@ -672,7 +749,19 @@
             group.children.forEach(c => {
                 c.castShadow = true;
                 c.userData.targetPos = c.position.clone();
-                c.userData.startPos = c.position.clone().add(new THREE.Vector3((Math.random()-0.5)*8, Math.random()*5, (Math.random()-0.5)*8));
+                // Start parts high in space with random positions
+                const startY = 80 + Math.random() * 40;
+                const startX = (Math.random() - 0.5) * 60;
+                const startZ = (Math.random() - 0.5) * 60;
+                c.userData.startPos = new THREE.Vector3(startX, startY, startZ);
+                c.userData.velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 2,
+                    -15 - Math.random() * 10,
+                    (Math.random() - 0.5) * 2
+                );
+                c.userData.isFalling = true;
+                c.userData.hasLanded = false;
+                c.userData.landedPos = c.position.clone();
                 c.position.copy(c.userData.startPos);
             }); 
             
@@ -706,6 +795,57 @@
                 }
             });
             window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+            
+            // Mobile controls
+            const mobileBtns = {
+                'btn-w': 'KeyW',
+                'btn-a': 'KeyA',
+                'btn-s': 'KeyS',
+                'btn-d': 'KeyD',
+                'btn-space': 'Space',
+                'btn-shift': 'ShiftLeft'
+            };
+            
+            for (const [btnId, keyCode] of Object.entries(mobileBtns)) {
+                const btn = document.getElementById(btnId);
+                if (btn) {
+                    btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyCode] = true; });
+                    btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyCode] = false; });
+                    btn.addEventListener('mousedown', (e) => { e.preventDefault(); keys[keyCode] = true; });
+                    btn.addEventListener('mouseup', (e) => { e.preventDefault(); keys[keyCode] = false; });
+                }
+            }
+            
+            // Touch look controls
+            let touchStartX = 0, touchStartY = 0;
+            renderer.domElement.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    touchStartX = e.touches[0].clientX;
+                    touchStartY = e.touches[0].clientY;
+                    // Start spawn if not spawning
+                    if (player.isSpawning && !document.body.classList.contains('spawning')) {
+                        const eff = document.getElementById('spawn-effect');
+                        eff.classList.remove('active'); void eff.offsetWidth; eff.classList.add('active');
+                        document.body.classList.add('spawning');
+                    }
+                }
+            });
+            
+            renderer.domElement.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1 && !player.isSpawning) {
+                    const dx = e.touches[0].clientX - touchStartX;
+                    const dy = e.touches[0].clientY - touchStartY;
+                    player.yaw -= dx * 0.005;
+                    player.pitch = THREE.MathUtils.clamp(player.pitch - dy * 0.005, -Math.PI/2 + 0.1, Math.PI/2 - 0.1);
+                    touchStartX = e.touches[0].clientX;
+                    touchStartY = e.touches[0].clientY;
+                }
+            });
+            
+            // Show mobile controls hint on mobile
+            if (window.matchMedia('(pointer: coarse)').matches) {
+                document.getElementById('click-to-start').querySelector('p').textContent = 'Tap to start - Touch controls at bottom';
+            }
         }
 
         function toggleCamera() {
@@ -739,7 +879,7 @@
         function updatePlayer(delta, time) {
             if (player.isSpawning) {
                 player.spawnTimer += delta;
-                const totalSpawnTime = 3.0;
+                const totalSpawnTime = 4.0;
                 const progress = Math.min(player.spawnTimer / totalSpawnTime, 1.0);
                 
                 const targetY = getTerrainHeight(CONFIG.spawnPoint.x, CONFIG.spawnPoint.z) + CONFIG.playerHeight;
@@ -750,18 +890,61 @@
                 pm.group.position.y -= CONFIG.playerHeight * 0.9; 
                 pm.group.rotation.y = time; 
 
+                // Update falling parts physics
+                let allLanded = true;
                 for(let key in pm.parts) {
                     let p = pm.parts[key];
-                    let ease = 1 - Math.pow(1 - progress, 3);
-                    p.position.lerpVectors(p.userData.startPos, p.userData.targetPos, ease);
+                    
+                    if (p.userData.isFalling) {
+                        allLanded = false;
+                        // Apply gravity
+                        p.userData.velocity.y += CONFIG.gravity * delta * 0.5;
+                        
+                        // Update position
+                        p.position.x += p.userData.velocity.x * delta;
+                        p.position.y += p.userData.velocity.y * delta;
+                        p.position.z += p.userData.velocity.z * delta;
+                        
+                        // Add rotation while falling
+                        p.rotation.x += delta * 2;
+                        p.rotation.z += delta * 1.5;
+                        
+                        // Check if hit ground
+                        const groundY = getTerrainHeight(player.position.x, player.position.z);
+                        if (p.position.y <= groundY + p.userData.targetPos.y) {
+                            p.position.y = groundY + p.userData.targetPos.y;
+                            p.userData.isFalling = false;
+                            p.userData.hasLanded = true;
+                            p.userData.landedPos = p.position.clone();
+                            // Stop rotation
+                            p.rotation.set(0, 0, 0);
+                        }
+                    } else {
+                        // Once landed, animate towards target position (assembly)
+                        if (!p.userData.assembling) {
+                            p.userData.assembling = true;
+                            p.userData.assembleStart = p.position.clone();
+                            p.userData.assembleTime = 0;
+                        }
+                        p.userData.assembleTime += delta;
+                        const assembleProgress = Math.min(p.userData.assembleTime / 1.5, 1.0);
+                        const ease = 1 - Math.pow(1 - assembleProgress, 3);
+                        p.position.lerpVectors(p.userData.assembleStart, p.userData.targetPos, ease);
+                    }
                 }
                 
-                if (progress >= 1.0) { 
+                // Camera follows the main body falling
+                camera.position.set(player.position.x + Math.sin(time*0.5)*10, player.position.y + 6, player.position.z + Math.cos(time*0.5)*10);
+                camera.lookAt(player.position.x, player.position.y + 1, player.position.z);
+                
+                if (allLanded && progress >= 0.9) { 
                     player.isSpawning = false; 
                     document.body.classList.remove('spawning');
                     pm.group.visible = !isFirstPerson; 
                     if(isFirstPerson) document.getElementById('crosshair').classList.add('visible');
                     player.yaw = Math.PI; player.pitch = 0;
+                    // Reset camera rotation to prevent slant after spawn
+                    camera.rotation.set(0, 0, 0);
                 }
                 return; 
             }
@@ -884,7 +1067,7 @@
             
             updateChunks(); 
             updateEnvironment(time); 
-            updateAltar(time);
+            // updateAltar(time); // Altar removed
 
             if (isPointerLocked) updatePlayer(delta, time);
             updateCamera(time);
