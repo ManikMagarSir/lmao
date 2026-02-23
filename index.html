@@ -20,6 +20,11 @@
         #crosshair::before { width: 16px; height: 2px; left: -8px; top: -1px; }
         #crosshair::after { width: 2px; height: 16px; left: -1px; top: -8px; }
         
+        #compass { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); width: 200px; height: 30px; background: rgba(0,0,0,0.4); border-radius: 15px; overflow: hidden; z-index: 100; border: 2px solid rgba(255,255,255,0.3); }
+        #compassNeedle { position: absolute; width: 4px; height: 100%; background: linear-gradient(to bottom, #ff4444 40%, #fff 40%, #fff 60%, #444 60%); left: 50%; transform: translateX(-50%); transition: transform 0.1s; }
+        #compass::before { content: 'N'; position: absolute; left: 5px; top: 50%; transform: translateY(-50%); color: #ff4444; font-size: 10px; font-weight: bold; }
+        #compass::after { content: 'S'; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); color: #666; font-size: 10px; font-weight: bold; }
+        
         #controls { position: fixed; bottom: 24px; left: 24px; color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 500; z-index: 100; display: flex; flex-direction: column; gap: 8px; pointer-events: none; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); transition: opacity 0.3s; }
         .control-key { display: inline-block; padding: 2px 8px; background: rgba(255,255,255,0.15); border-radius: 3px; color: #7fdb8a; margin-right: 8px; font-weight: 700; border: 1px solid rgba(127, 219, 138, 0.3); width: 55px; text-align: center; }
         
@@ -77,6 +82,7 @@
     <div id="ui">
         <div id="mode">First Person</div>
         <div id="coords">X: 0 | Z: 0</div>
+        <div id="compass"><div id="compassNeedle"></div></div>
     </div>
     <div id="crosshair"></div>
     <div id="controls">
@@ -124,8 +130,8 @@
         // ============ CONFIGURATION ============
         const CONFIG = {
             chunkSize: 120,          
-            chunkRes: 32,            
-            renderDist: 3,           
+            chunkRes: 24,            
+            renderDist: 4,           
             waterLevel: 4,
             gravity: -30,
             playerSpeed: 12,
@@ -134,8 +140,9 @@
             playerHeight: 1.8,
             playerRadius: 0.45,
             spawnPoint: { x: 0, z: 0 },
-            maxTreesPerChunk: 100, 
-            maxRocksPerChunk: 30,
+            maxTreesPerChunk: 60, 
+            maxRocksPerChunk: 15,
+            maxHutsPerChunk: 2,
             cycleDuration: 600
         };
 
@@ -157,8 +164,8 @@
         const mobs = [];
 
         // Shared Materials & Geometries
-        let terrainMat, treeMat, leavesMat, rockMat;
-        let trunkGeo, pineGeo, oakGeo, acaciaGeo, rockGeo;
+        let terrainMat, treeMat, leavesMat, rockMat, hutMat;
+        let trunkGeo, pineGeo, oakGeo, acaciaGeo, rockGeo, hutGeo;
 
         function updateLoading(percent) {
             const bar = document.getElementById('loader-bar');
@@ -238,7 +245,7 @@
 
             renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -251,6 +258,8 @@
             createInfiniteWater();
             createInfiniteSkybox();
             createFireflies();
+            createWeatherSystem();
+            createButterfliesAndPollen();
             
             playerModelData = createPlayerModel();
             // createSpawnAltar();
@@ -258,14 +267,15 @@
 
             setupEvents();
             initMinimap();
+            createLandmarks();
             forceLoadChunks(Math.floor(CONFIG.spawnPoint.x / CONFIG.chunkSize), Math.floor(CONFIG.spawnPoint.z / CONFIG.chunkSize));
             
             // Generate random spawn point avoiding mountains and water
             let validSpawn = false;
             let attempts = 0;
-            while (!validSpawn && attempts < 100) {
-                const sx = (Math.random() - 0.5) * 200;
-                const sz = (Math.random() - 0.5) * 200;
+            while (!validSpawn && attempts < 200) {
+                const sx = (Math.random() - 0.5) * 400;
+                const sz = (Math.random() - 0.5) * 400;
                 const height = getTerrainHeight(sx, sz);
                 // Spawn between water level + 2 and height < 50 (avoid mountains and water)
                 if (height > CONFIG.waterLevel + 2 && height < 50) {
@@ -281,7 +291,7 @@
             
             // Set initial spawn position (will be assembled from falling parts)
             const spawnHeight = getTerrainHeight(CONFIG.spawnPoint.x, CONFIG.spawnPoint.z);
-            player.position.set(CONFIG.spawnPoint.x, spawnHeight, CONFIG.spawnPoint.z);
+            player.position.set(CONFIG.spawnPoint.x, spawnHeight + CONFIG.playerHeight, CONFIG.spawnPoint.z);
 
             setTimeout(() => {
                 document.getElementById('loading').classList.add('hidden');
@@ -295,8 +305,8 @@
             scene.add(hemi); scene.userData.hemi = hemi;
 
             const sun = new THREE.DirectionalLight(0xfff0dd, 1.2);
-            sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
-            sun.shadow.camera.near = 10; sun.shadow.camera.far = 400;
+            sun.castShadow = true; sun.shadow.mapSize.set(512, 512);
+            sun.shadow.camera.near = 10; sun.shadow.camera.far = 200;
             const d = 120;
             sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
             sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
@@ -310,6 +320,20 @@
             moon.shadow.camera.top = d; moon.shadow.camera.bottom = -d;
             moon.shadow.bias = -0.001;
             scene.add(moon); scene.userData.moon = moon;
+
+            // Create visible sun mesh
+            const sunMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(15, 32, 32),
+                new THREE.MeshBasicMaterial({ color: 0xffdd44 })
+            );
+            scene.add(sunMesh); scene.userData.sunMesh = sunMesh;
+
+            // Create visible moon mesh
+            const moonMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(10, 32, 32),
+                new THREE.MeshBasicMaterial({ color: 0xdddddd })
+            );
+            scene.add(moonMesh); scene.userData.moonMesh = moonMesh;
         }
 
         // ============ COMPOSITE GEOMETRIES ============
@@ -345,6 +369,15 @@
             acaciaGeo = BufferGeometryUtils.mergeGeometries([a1, a2, a3]);
 
             rockGeo = new THREE.DodecahedronGeometry(1, 0);
+
+            // Hut (Small wooden structure with roof)
+            hutMat = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.9 });
+            const hutBase = new THREE.BoxGeometry(3, 2.5, 3);
+            hutBase.translate(0, 1.25, 0);
+            const hutRoof = new THREE.ConeGeometry(2.5, 2, 4);
+            hutRoof.translate(0, 3.5, 0);
+            hutRoof.rotateY(Math.PI / 4);
+            hutGeo = BufferGeometryUtils.mergeGeometries([hutBase, hutRoof]);
         }
 
         function createSpawnAltar() {
@@ -385,7 +418,7 @@
             scene.add(altarGroup);
             spawnAltar = altarGroup;
 
-            player.position.y = startY - 4.0; // Start underground for rising animation
+            player.position.y = startY + CONFIG.playerHeight; // Spawn above ground
         }
 
         // ============ CHUNK SYSTEM ============
@@ -406,7 +439,10 @@
             const rocks = new THREE.InstancedMesh(rockGeo, rockMat, CONFIG.maxRocksPerChunk); rocks.castShadow = true; rocks.receiveShadow = true; rocks.frustumCulled = false; 
             group.add(rocks);
 
-            return { group, terrain, trunks, pines, oaks, acacias, rocks, colliders: [], active: false };
+            const huts = new THREE.InstancedMesh(hutGeo, hutMat, CONFIG.maxHutsPerChunk); huts.castShadow = true; huts.receiveShadow = true; huts.frustumCulled = false;
+            group.add(huts);
+
+            return { group, terrain, trunks, pines, oaks, acacias, rocks, huts, colliders: [], active: false };
         }
 
         function getChunkFromPool() { return chunkPool.length > 0 ? chunkPool.pop() : createChunkObject(); }
@@ -432,8 +468,14 @@
                     color.setHex(0x525252).lerp(new THREE.Color(0x404040), mapNoise.noise2D(px, pz)); 
                 } else if (y < CONFIG.waterLevel + 1.5) {
                     color.setHex(0x5a5030); 
-                } else if (y > 90) {
-                    color.setHex(0xdddddd); 
+                } else if (y > 80) {
+                    color.setHex(0xeeeeff).lerp(new THREE.Color(0xdddddd), mapNoise.noise2D(px, pz));
+                } else if (y < CONFIG.waterLevel + 2 && moisture > 0.5) {
+                    color.setHex(0x2d3a1f).lerp(new THREE.Color(0x1a2515), mapNoise.noise2D(px, pz));
+                } else if (moisture < 0.35 && y > 30 && y < 70) {
+                    color.setHex(0x8faa50).lerp(new THREE.Color(0x7a9a40), mapNoise.noise2D(px, pz));
+                } else if (moisture < 0.3 && y > 40 && y < 75) {
+                    color.setHex(0x1a2a10).lerp(new THREE.Color(0x0a1505), mapNoise.noise2D(px, pz));
                 } else {
                     color.lerpColors(new THREE.Color(0x6b703a), new THREE.Color(0x1b3d16), moisture);
                 }
@@ -445,7 +487,7 @@
             chunk.terrain.geometry.attributes.normal.needsUpdate = true;
 
             const dummy = new THREE.Object3D(); const leafColor = new THREE.Color();
-            let treeIdx = 0, pineIdx = 0, oakIdx = 0, acaciaIdx = 0, rockIdx = 0;
+            let treeIdx = 0, pineIdx = 0, oakIdx = 0, acaciaIdx = 0, rockIdx = 0, hutIdx = 0;
             chunk.colliders.length = 0;
 
             let rngState = cx * 1000 + cz;
@@ -453,7 +495,7 @@
 
             const occupied = []; // Local spatial check to prevent overlaps
 
-            for(let i=0; i < 200; i++) {
+            for(let i=0; i < 120; i++) {
                 if (treeIdx >= CONFIG.maxTreesPerChunk && rockIdx >= CONFIG.maxRocksPerChunk) break;
                 
                 const lx = (rand() - 0.5) * CONFIG.chunkSize; const lz = (rand() - 0.5) * CONFIG.chunkSize;
@@ -487,6 +529,13 @@
                     const scale = 0.5 + (moisture * 1.5) + (rand() * 0.4); 
                     const r = 0.6 * scale * 2.0; // Avoid rocks
                     
+                    // Determine biome for tree type
+                    let isPine = false, isOak = false, isAcacia = false, isDeadTree = false;
+                    if (wy > 60 || (wy > 40 && moisture < 0.4)) isPine = true;
+                    else if (moisture > 0.5 && wy < CONFIG.waterLevel + 5) isOak = true;
+                    else if (moisture < 0.35) isAcacia = true;
+                    else if (moisture < 0.3) isDeadTree = true;
+                    
                     let canPlace = true;
                     for(let c of occupied) { if(Math.hypot(wx - c.x, wz - c.z) < r + c.r) { canPlace = false; break; } }
 
@@ -496,15 +545,24 @@
                         
                         dummy.position.set(lx, wy, lz); dummy.updateMatrix(); // Leaves offset built into geometry now
 
-                        if (wy > 60 || (wy > 40 && moisture < 0.4)) {
+                        if (isPine) {
                             chunk.pines.setMatrixAt(pineIdx, dummy.matrix);
                             leafColor.setHex(0x1e3620).lerp(new THREE.Color(0x28472a), rand()); chunk.pines.setColorAt(pineIdx, leafColor); pineIdx++;
-                        } else if (moisture > 0.5) {
+                        } else if (isOak) {
                             chunk.oaks.setMatrixAt(oakIdx, dummy.matrix);
                             leafColor.setHex(0x1a401a).lerp(new THREE.Color(0x3a6b22), rand()); chunk.oaks.setColorAt(oakIdx, leafColor); oakIdx++;
-                        } else {
+                        } else if (isAcacia) {
                             chunk.acacias.setMatrixAt(acaciaIdx, dummy.matrix);
                             leafColor.setHex(0x556b2f).lerp(new THREE.Color(0x6b8e23), rand()); chunk.acacias.setColorAt(acaciaIdx, leafColor); acaciaIdx++;
+                        } else if (isDeadTree) {
+                            // Dead trees in dark forest - no leaves
+                            chunk.deadTrees = chunk.deadTrees || new THREE.InstancedMesh(trunkGeo, trunkMat || new THREE.MeshStandardMaterial({ color: 0x3a3025 }), 50);
+                            if (!chunk.deadTrees) { trunkMat = trunkMat || new THREE.MeshStandardMaterial({ color: 0x3a3025, roughness: 1 }); }
+                            chunk.deadTrees.setMatrixAt((chunk.deadTrees.count || 0), dummy.matrix);
+                            chunk.deadTrees.count = (chunk.deadTrees.count || 0) + 1;
+                        } else {
+                            chunk.oaks.setMatrixAt(oakIdx, dummy.matrix);
+                            leafColor.setHex(0x1a401a).lerp(new THREE.Color(0x3a6b22), rand()); chunk.oaks.setColorAt(oakIdx, leafColor); oakIdx++;
                         }
                         
                         chunk.colliders.push({ x: wx, y: wy, z: wz, radius: 0.6 * scale, height: 10.0 });
@@ -513,12 +571,53 @@
                     }
                 }
             }
+
+            // Try to spawn huts (very low chance - less common than trees)
+            for (let i = 0; i < 30 && hutIdx < CONFIG.maxHutsPerChunk; i++) {
+                const lx = (rand() - 0.5) * CONFIG.chunkSize;
+                const lz = (rand() - 0.5) * CONFIG.chunkSize;
+                const wx = lx + chunkBaseX;
+                const wz = lz + chunkBaseZ;
+                const wy = getTerrainHeight(wx, wz);
+
+                // Only spawn huts on flat land away from spawn, not in water or mountains
+                if (Math.sqrt((wx - CONFIG.spawnPoint.x)**2 + (wz - CONFIG.spawnPoint.z)**2) < 30) continue;
+                if (wy < CONFIG.waterLevel + 2 || wy > 60) continue;
+
+                const norm = getTerrainNormal(wx, wz);
+                if (norm.y < 0.9) continue; // Must be relatively flat
+
+                // Very low spawn chance (about 3% per attempt)
+                if (rand() > 0.03) continue;
+
+                const r = 2.5; // Hut collision radius
+                let canPlace = true;
+                for (let c of occupied) {
+                    if (Math.hypot(wx - c.x, wz - c.z) < r + c.r) {
+                        canPlace = false;
+                        break;
+                    }
+                }
+
+                if (canPlace) {
+                    const scale = 0.8 + rand() * 0.4;
+                    dummy.position.set(lx, wy, lz);
+                    dummy.rotation.set(0, rand() * Math.PI * 2, 0);
+                    dummy.scale.set(scale, scale, scale);
+                    dummy.updateMatrix();
+                    chunk.huts.setMatrixAt(hutIdx, dummy.matrix);
+                    chunk.colliders.push({ x: wx, y: wy, z: wz, radius: 2.0 * scale, height: 5.0 * scale });
+                    occupied.push({ x: wx, z: wz, r: r });
+                    hutIdx++;
+                }
+            }
             
             chunk.trunks.count = treeIdx; chunk.trunks.instanceMatrix.needsUpdate = true;
             chunk.pines.count = pineIdx; chunk.pines.instanceMatrix.needsUpdate = true; if(chunk.pines.instanceColor) chunk.pines.instanceColor.needsUpdate = true;
             chunk.oaks.count = oakIdx; chunk.oaks.instanceMatrix.needsUpdate = true; if(chunk.oaks.instanceColor) chunk.oaks.instanceColor.needsUpdate = true;
             chunk.acacias.count = acaciaIdx; chunk.acacias.instanceMatrix.needsUpdate = true; if(chunk.acacias.instanceColor) chunk.acacias.instanceColor.needsUpdate = true;
             chunk.rocks.count = rockIdx; chunk.rocks.instanceMatrix.needsUpdate = true;
+            chunk.huts.count = hutIdx; chunk.huts.instanceMatrix.needsUpdate = true;
             
             chunk.active = true;
         }
@@ -562,7 +661,7 @@
 
         function createInfiniteWater() {
             water = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000, 32, 32).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({
-                uniforms: { uTime: { value: 0 }, uColor1: { value: new THREE.Color(0x0e2b3c) }, uColor2: { value: new THREE.Color(0x1e4f6a) } },
+                uniforms: { uTime: { value: 0 }, uColor1: { value: new THREE.Color(0x0077be) }, uColor2: { value: new THREE.Color(0x00aadd) } },
                 vertexShader: `uniform float uTime; varying float vElevation; void main() { vec4 worldPos = modelMatrix * vec4(position, 1.0); worldPos.y += sin(worldPos.x * 0.2 + uTime) * 0.2 + sin(worldPos.z * 0.2 + uTime * 0.8) * 0.2; vElevation = worldPos.y; gl_Position = projectionMatrix * viewMatrix * worldPos; }`,
                 fragmentShader: `uniform vec3 uColor1, uColor2; varying float vElevation; void main() { gl_FragColor = vec4(mix(uColor1, uColor2, (vElevation - 3.5) * 1.5), 0.85); }`,
                 transparent: true, side: THREE.DoubleSide
@@ -571,7 +670,105 @@
         }
 
         function createInfiniteSkybox() {
-            skybox = new THREE.Mesh(new THREE.SphereGeometry(800, 16, 16), new THREE.MeshBasicMaterial({ color: 0x7ec0ee, side: THREE.BackSide, fog: false }));
+            skybox = new THREE.Mesh(new THREE.SphereGeometry(800, 32, 32), new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uDayColor: { value: new THREE.Color(0x7ec0ee) },
+                    uNightColor: { value: new THREE.Color(0x02040a) },
+                    uSunPosition: { value: new THREE.Vector3(0, 1, 0) }
+                },
+                vertexShader: `
+                    varying vec3 vWorldPosition;
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                        vWorldPosition = worldPos.xyz;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    uniform vec3 uDayColor;
+                    uniform vec3 uNightColor;
+                    uniform vec3 uSunPosition;
+                    varying vec3 vWorldPosition;
+                    varying vec2 vUv;
+                    
+                    float hash(vec2 p) {
+                        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                    }
+                    
+                    float noise(vec2 p) {
+                        vec2 i = floor(p);
+                        vec2 f = fract(p);
+                        f = f * f * (3.0 - 2.0 * f);
+                        float a = hash(i);
+                        float b = hash(i + vec2(1.0, 0.0));
+                        float c = hash(i + vec2(0.0, 1.0));
+                        float d = hash(i + vec2(1.0, 1.0));
+                        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+                    }
+                    
+                    float fbm(vec2 p) {
+                        float v = 0.0;
+                        float a = 0.5;
+                        for (int i = 0; i < 5; i++) {
+                            v += a * noise(p);
+                            p *= 2.0;
+                            a *= 0.5;
+                        }
+                        return v;
+                    }
+                    
+                    void main() {
+                        vec3 dir = normalize(vWorldPosition);
+                        float y = dir.y * 0.5 + 0.5;
+                        
+                        // Day/night blend based on sun height
+                        float sunHeight = uSunPosition.y;
+                        float dayFactor = smoothstep(-0.1, 0.3, sunHeight);
+                        float nightFactor = 1.0 - dayFactor;
+                        
+                        // Base sky color
+                        vec3 skyColor = mix(uNightColor, uDayColor, dayFactor);
+                        
+                        // Clouds
+                        vec2 cloudUv = dir.xz / (dir.y + 0.3) * 2.0;
+                        cloudUv += uTime * 0.02;
+                        float clouds = fbm(cloudUv * 3.0);
+                        clouds = smoothstep(0.4, 0.7, clouds);
+                        vec3 cloudColor = mix(vec3(0.9, 0.95, 1.0), vec3(1.0, 0.9, 0.8), 1.0 - dayFactor);
+                        skyColor = mix(skyColor, cloudColor, clouds * dayFactor * 0.7);
+                        
+                        // Stars at night
+                        if (nightFactor > 0.1) {
+                            vec2 starUv = dir.xz * 100.0;
+                            float stars = step(0.998, hash(floor(starUv)));
+                            float twinkle = sin(uTime * 3.0 + hash(floor(starUv)) * 100.0) * 0.5 + 0.5;
+                            skyColor += vec3(stars * twinkle * nightFactor);
+                            
+                            // Shooting stars occasionally
+                            float shootingStar = step(0.9999, hash(vec2(floor(uTime * 10.0), 1.0)));
+                            if (shootingStar > 0.5) {
+                                vec2 shootUv = fract(dir.xz * 50.0 + vec2(uTime * 2.0, 0.0));
+                                float shoot = smoothstep(0.02, 0.0, abs(shootUv.x - shootUv.y));
+                                skyColor += vec3(shoot * nightFactor * 2.0);
+                            }
+                        }
+                        
+                        // Twilight colors
+                        float twilightFactor = 1.0 - abs(sunHeight);
+                        if (sunHeight < 0.2 && sunHeight > -0.1) {
+                            vec3 twilightColor = mix(vec3(1.0, 0.4, 0.2), vec3(0.3, 0.1, 0.3), (sunHeight + 0.1) / 0.3);
+                            skyColor = mix(skyColor, twilightColor, twilightFactor * 0.6);
+                        }
+                        
+                        gl_FragColor = vec4(skyColor, 1.0);
+                    }
+                `,
+                side: THREE.BackSide, fog: false
+            }));
             scene.add(skybox);
         }
 
@@ -591,6 +788,386 @@
             scene.add(fireflies);
         }
 
+        // ============ WEATHER SYSTEM ============
+        let rain, mist, lightning;
+        let weatherState = { isRaining: false, isStorming: false, mistDensity: 0, rainIntensity: 0 };
+        
+        function createWeatherSystem() {
+            // Rain particles
+            const rainCount = 5000;
+            const rainGeo = new THREE.BufferGeometry();
+            const rainPositions = new Float32Array(rainCount * 3);
+            for (let i = 0; i < rainCount; i++) {
+                rainPositions[i * 3] = (Math.random() - 0.5) * 100;
+                rainPositions[i * 3 + 1] = Math.random() * 50;
+                rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 100;
+            }
+            rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+            rain = new THREE.Points(rainGeo, new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 }, uIntensity: { value: 0 } },
+                vertexShader: `uniform float uTime; uniform float uIntensity; void main() {
+                    vec3 pos = position;
+                    pos.y = mod(pos.y - uTime * 30.0, 50.0);
+                    vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                    gl_PointSize = (3.0 * uIntensity) / -mvPosition.z;
+                    gl_Position = projectionMatrix * mvPosition;
+                }`,
+                fragmentShader: `uniform float uIntensity; void main() {
+                    gl_FragColor = vec4(0.7, 0.8, 1.0, uIntensity * 0.6);
+                }`,
+                transparent: true, depthWrite: false
+            }));
+            rain.visible = false;
+            scene.add(rain);
+            scene.userData.weather = rain;
+
+            // Ground mist
+            mist = new THREE.Mesh(
+                new THREE.PlaneGeometry(200, 200, 1, 1),
+                new THREE.ShaderMaterial({
+                    uniforms: { uTime: { value: 0 }, uDensity: { value: 0 } },
+                    vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                    fragmentShader: `uniform float uTime; uniform float uDensity; varying vec2 vUv;
+                        float noise(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+                        void main() {
+                            float n = noise(vUv * 10.0 + uTime * 0.1);
+                            float alpha = uDensity * 0.4 * n * (1.0 - length(vUv - 0.5) * 1.5);
+                            gl_FragColor = vec4(0.9, 0.95, 1.0, alpha);
+                        }`,
+                    transparent: true, depthWrite: false, side: THREE.DoubleSide
+                })
+            );
+            mist.rotation.x = -Math.PI / 2;
+            mist.position.y = CONFIG.waterLevel + 2;
+            mist.visible = false;
+            scene.add(mist);
+
+            // Lightning light
+            lightning = new THREE.DirectionalLight(0xffffff, 0);
+            lightning.position.set(0, 100, 0);
+            scene.add(lightning);
+            scene.userData.lightning = lightning;
+        }
+
+        // ============ SOUND SYSTEM ============
+        let windSound, cricketsSound;
+        let audioInitialized = false;
+        
+        function initAudio() {
+            if (audioInitialized) return;
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                masterGain = audioContext.createGain();
+                masterGain.gain.value = 0.3;
+                masterGain.connect(audioContext.destination);
+                
+                // Wind sound (filtered noise)
+                const windNoise = audioContext.createBufferSource();
+                const bufferSize = audioContext.sampleRate * 2;
+                const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    output[i] = Math.random() * 2 - 1;
+                }
+                windNoise.buffer = noiseBuffer;
+                windNoise.loop = true;
+                const windFilter = audioContext.createBiquadFilter();
+                windFilter.type = 'lowpass';
+                windFilter.frequency.value = 400;
+                const windGain = audioContext.createGain();
+                windGain.gain.value = 0.15;
+                windNoise.connect(windFilter);
+                windFilter.connect(windGain);
+                windGain.connect(masterGain);
+                windNoise.start();
+                
+                // Crickets (oscillator with modulation)
+                const cricketOsc = audioContext.createOscillator();
+                cricketOsc.type = 'sine';
+                cricketOsc.frequency.value = 4000;
+                const cricketGain = audioContext.createGain();
+                cricketGain.gain.value = 0;
+                const cricketLfo = audioContext.createOscillator();
+                cricketLfo.frequency.value = 15;
+                const cricketLfoGain = audioContext.createGain();
+                cricketLfoGain.gain.value = 500;
+                cricketLfo.connect(cricketLfoGain);
+                cricketLfoGain.connect(cricketOsc.frequency);
+                cricketOsc.connect(cricketGain);
+                cricketGain.connect(masterGain);
+                cricketOsc.start();
+                cricketLfo.start();
+                
+                windSound = windGain;
+                cricketsSound = cricketGain;
+                
+                audioInitialized = true;
+                scene.userData.audioInitialized = true;
+            } catch (e) {
+                console.log('Audio not available');
+            }
+        }
+        
+        function updateAudio(sunFactor) {
+            if (!audioInitialized) return;
+            const nightFactor = 1 - sunFactor;
+            cricketsSound.gain.setTargetAtTime(nightFactor * 0.08, audioContext.currentTime, 0.5);
+            windSound.gain.setTargetAtTime(0.1 + nightFactor * 0.1, audioContext.currentTime, 0.5);
+        }
+        
+        function playBirdChirp() {
+            if (!audioInitialized || Math.random() > 0.015) return;
+            const osc = audioContext.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.value = 2000 + Math.random() * 2000;
+            const gain = audioContext.createGain();
+            gain.gain.value = 0.03;
+            gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.2);
+            osc.connect(gain);
+            gain.connect(masterGain);
+            osc.start();
+            osc.stop(audioContext.currentTime + 0.2);
+        }
+
+        // ============ BUTTERFLIES & POLLEN ============
+        let butterflies, pollen;
+        
+        function createButterfliesAndPollen() {
+            // Butterflies
+            const butterflyCount = 100;
+            const butterflyGeo = new THREE.BufferGeometry();
+            const butterflyPos = new Float32Array(butterflyCount * 3);
+            const butterflyPhases = new Float32Array(butterflyCount);
+            for (let i = 0; i < butterflyCount; i++) {
+                butterflyPos[i * 3] = (Math.random() - 0.5) * 60;
+                butterflyPos[i * 3 + 1] = 2 + Math.random() * 8;
+                butterflyPos[i * 3 + 2] = (Math.random() - 0.5) * 60;
+                butterflyPhases[i] = Math.random() * Math.PI * 2;
+            }
+            butterflyGeo.setAttribute('position', new THREE.BufferAttribute(butterflyPos, 3));
+            butterflyGeo.setAttribute('aPhase', new THREE.BufferAttribute(butterflyPhases, 1));
+            
+            butterflies = new THREE.Points(butterflyGeo, new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 }, uDayFactor: { value: 1.0 } },
+                vertexShader: `
+                    uniform float uTime;
+                    attribute float aPhase;
+                    varying float vAlpha;
+                    void main() {
+                        vec3 p = position;
+                        p.y += sin(uTime * 2.0 + aPhase) * 1.5;
+                        p.x += sin(uTime * 1.5 + aPhase) * 3.0;
+                        p.z += cos(uTime * 1.2 + aPhase) * 3.0;
+                        vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+                        gl_PointSize = (8.0 / -mvPosition.z);
+                        vAlpha = 0.7 + sin(uTime * 5.0 + aPhase) * 0.3;
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uDayFactor;
+                    varying float vAlpha;
+                    void main() {
+                        float dist = length(gl_PointCoord - vec2(0.5));
+                        if (dist > 0.5) discard;
+                        vec3 color = mix(vec3(1.0, 0.8, 0.2), vec3(0.8, 0.4, 1.0), fract(gl_PointCoord.x * 2.0));
+                        gl_FragColor = vec4(color, vAlpha * uDayFactor);
+                    }
+                `,
+                transparent: true, depthWrite: false
+            }));
+            scene.add(butterflies);
+            
+            // Pollen particles (sunlight particles)
+            const pollenCount = 500;
+            const pollenGeo = new THREE.BufferGeometry();
+            const pollenPos = new Float32Array(pollenCount * 3);
+            const pollenPhases = new Float32Array(pollenCount);
+            for (let i = 0; i < pollenCount; i++) {
+                pollenPos[i * 3] = (Math.random() - 0.5) * 40;
+                pollenPos[i * 3 + 1] = Math.random() * 12;
+                pollenPos[i * 3 + 2] = (Math.random() - 0.5) * 40;
+                pollenPhases[i] = Math.random() * Math.PI * 2;
+            }
+            pollenGeo.setAttribute('position', new THREE.BufferAttribute(pollenPos, 3));
+            pollenGeo.setAttribute('aPhase', new THREE.BufferAttribute(pollenPhases, 1));
+            
+            pollen = new THREE.Points(pollenGeo, new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 }, uDayFactor: { value: 1.0 } },
+                vertexShader: `
+                    uniform float uTime;
+                    attribute float aPhase;
+                    varying float vAlpha;
+                    void main() {
+                        vec3 p = position;
+                        p.y += sin(uTime * 0.5 + aPhase) * 0.5;
+                        p.x += cos(uTime * 0.3 + aPhase) * 0.3;
+                        vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+                        gl_PointSize = (4.0 / -mvPosition.z);
+                        vAlpha = 0.3 + sin(uTime * 2.0 + aPhase) * 0.2;
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uDayFactor;
+                    varying float vAlpha;
+                    void main() {
+                        float dist = length(gl_PointCoord - vec2(0.5));
+                        if (dist > 0.5) discard;
+                        gl_FragColor = vec4(1.0, 1.0, 0.8, vAlpha * uDayFactor * 0.5);
+                    }
+                `,
+                transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+            }));
+            scene.add(pollen);
+        }
+
+        function updateButterfliesAndPollen(time, sunFactor) {
+            if (butterflies) {
+                butterflies.position.copy(player.position);
+                butterflies.material.uniforms.uTime.value = time;
+                butterflies.material.uniforms.uDayFactor.value = sunFactor;
+                butterflies.visible = sunFactor > 0.3;
+            }
+            if (pollen) {
+                pollen.position.copy(player.position);
+                pollen.material.uniforms.uTime.value = time;
+                pollen.material.uniforms.uDayFactor.value = sunFactor;
+                pollen.visible = sunFactor > 0.2;
+            }
+        }
+
+        // ============ WORLD LANDMARKS ============
+        function createLandmarks() {
+            const landmarkPositions = [
+                { x: 80, z: 80, type: 'giantTree' },
+                { x: -120, z: 60, type: 'stoneCircle' },
+                { x: 150, z: -80, type: 'ruinedTower' },
+                { x: -60, z: -150, type: 'campsite' }
+            ];
+            
+            for (const lm of landmarkPositions) {
+                const y = getTerrainHeight(lm.x, lm.z);
+                
+                if (lm.type === 'giantTree') {
+                    // Giant ancient tree
+                    const trunk = new THREE.Mesh(
+                        new THREE.CylinderGeometry(2, 4, 25, 8),
+                        new THREE.MeshStandardMaterial({ color: 0x2a1a0a, roughness: 1 })
+                    );
+                    trunk.position.set(lm.x, y + 12, lm.z);
+                    scene.add(trunk);
+                    
+                    // Add multiple leaf clusters
+                    for (let i = 0; i < 5; i++) {
+                        const leaves = new THREE.Mesh(
+                            new THREE.DodecahedronGeometry(8 - i),
+                            new THREE.MeshStandardMaterial({ color: 0x1a3a1a, flatShading: true })
+                        );
+                        leaves.position.set(
+                            lm.x + (Math.random() - 0.5) * 10,
+                            y + 20 + i * 4,
+                            lm.z + (Math.random() - 0.5) * 10
+                        );
+                        scene.add(leaves);
+                    }
+                }
+                else if (lm.type === 'stoneCircle') {
+                    // Stone circle landmark
+                    for (let i = 0; i < 8; i++) {
+                        const angle = (i / 8) * Math.PI * 2;
+                        const stone = new THREE.Mesh(
+                            new THREE.BoxGeometry(2, 4, 1.5),
+                            new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9 })
+                        );
+                        stone.position.set(
+                            lm.x + Math.cos(angle) * 12,
+                            y + 2,
+                            lm.z + Math.sin(angle) * 12
+                        );
+                        stone.rotation.y = angle;
+                        stone.rotation.x = (Math.random() - 0.5) * 0.3;
+                        scene.add(stone);
+                    }
+                    // Center altar stone
+                    const centerStone = new THREE.Mesh(
+                        new THREE.CylinderGeometry(3, 4, 2, 6),
+                        new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.8 })
+                    );
+                    centerStone.position.set(lm.x, y + 1, lm.z);
+                    scene.add(centerStone);
+                }
+                else if (lm.type === 'ruinedTower') {
+                    // Ruined tower
+                    for (let i = 0; i < 4; i++) {
+                        const wall = new THREE.Mesh(
+                            new THREE.BoxGeometry(8, 15, 1),
+                            new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.9 })
+                        );
+                        wall.position.set(lm.x, y + 7, lm.z);
+                        wall.rotation.y = (i / 4) * Math.PI * 2;
+                        wall.position.x += Math.cos(wall.rotation.y) * 5;
+                        wall.position.z += Math.sin(wall.rotation.y) * 5;
+                        scene.add(wall);
+                    }
+                }
+                else if (lm.type === 'campsite') {
+                    // Abandoned campsite with fire
+                    const fireLight = new THREE.PointLight(0xff6600, 2, 20);
+                    fireLight.position.set(lm.x, y + 1, lm.z);
+                    scene.add(fireLight);
+                    
+                    // Logs around fire
+                    for (let i = 0; i < 5; i++) {
+                        const log = new THREE.Mesh(
+                            new THREE.CylinderGeometry(0.3, 0.3, 2, 6),
+                            new THREE.MeshStandardMaterial({ color: 0x3a2010 })
+                        );
+                        log.position.set(
+                            lm.x + (Math.random() - 0.5) * 3,
+                            y + 0.3,
+                            lm.z + (Math.random() - 0.5) * 3
+                        );
+                        log.rotation.z = Math.PI / 2;
+                        log.rotation.y = Math.random() * Math.PI;
+                        scene.add(log);
+                    }
+                    scene.userData.fireLight = fireLight;
+                }
+            }
+        }
+
+        function updateWeather(time, dt) {
+            if (!scene.userData.weather) return;
+            
+            // Random weather changes
+            const weatherCycle = Math.sin(time * 0.01) * 0.5 + 0.5;
+            const isStorming = weatherCycle > 0.7;
+            const isRaining = weatherCycle > 0.4;
+            
+            // Rain
+            rain.visible = isRaining;
+            rain.material.uniforms.uTime.value = time;
+            rain.material.uniforms.uIntensity.value = isStorming ? 1.0 : 0.5;
+            rain.position.copy(player.position);
+            rain.position.y = player.position.y + 20;
+
+            // Mist in valleys
+            const inValley = player.position.y < CONFIG.waterLevel + 5;
+            const mistDensity = inValley ? 0.6 : (isRaining ? 0.3 : 0.1);
+            mist.visible = mistDensity > 0.05;
+            mist.material.uniforms.uDensity.value = mistDensity;
+            mist.material.uniforms.uTime.value = time;
+            mist.position.x = player.position.x;
+            mist.position.z = player.position.z;
+
+            // Lightning during storms
+            if (isStorming && Math.random() < 0.002) {
+                lightning.intensity = 3.0;
+                setTimeout(() => { lightning.intensity = 0; }, 100);
+            }
+        }
+
         function updateEnvironment(time) {
             water.material.uniforms.uTime.value = time; water.position.set(player.position.x, CONFIG.waterLevel, player.position.z);
             skybox.position.copy(player.position);
@@ -601,24 +1178,44 @@
 
             const sunY = Math.sin(theta); const sunX = Math.cos(theta);
             const sun = scene.userData.sun; const moon = scene.userData.moon; const hemi = scene.userData.hemi;
+            const sunMesh = scene.userData.sunMesh; const moonMesh = scene.userData.moonMesh;
 
             if(sun && moon && hemi) {
                 const orbitRadius = 400;
                 sun.position.set(player.position.x + sunX * orbitRadius, sunY * orbitRadius, player.position.z + 100);
                 moon.position.set(player.position.x - sunX * orbitRadius, -sunY * orbitRadius, player.position.z - 100);
+                
+                // Update visible sun and moon mesh positions
+                if (sunMesh) sunMesh.position.copy(sun.position);
+                if (moonMesh) moonMesh.position.copy(moon.position);
+                
                 sun.target.position.copy(player.position); sun.target.updateMatrixWorld();
                 moon.target.position.copy(player.position); moon.target.updateMatrixWorld();
 
                 const sunFactor = Math.max(0, sunY); const moonFactor = Math.max(0, -sunY);
+                scene.userData.sunFactor = sunFactor;
                 sun.intensity = sunFactor * 1.5; moon.intensity = moonFactor * 0.5;
+
+                // Show/hide sun and moon meshes based on time of day
+                if (sunMesh) {
+                    sunMesh.visible = sunFactor > 0.05;
+                }
+                if (moonMesh) {
+                    moonMesh.visible = moonFactor > 0.05;
+                }
 
                 const daySky = new THREE.Color(0x7ec0ee); const nightSky = new THREE.Color(0x02040a);
                 const twilightBlend = Math.max(0, Math.min(1, sunY + 0.2)); 
                 const currentSky = new THREE.Color().lerpColors(nightSky, daySky, twilightBlend);
 
-                scene.background.copy(currentSky); scene.fog.color.copy(currentSky); skybox.material.color.copy(currentSky);
+                scene.background.copy(currentSky); scene.fog.color.copy(currentSky);
+                skybox.material.uniforms.uTime.value = time;
+                skybox.material.uniforms.uSunPosition.value.set(sunX, sunY, 0);
                 hemi.color.lerpColors(new THREE.Color(0x051020), daySky, sunFactor);
                 hemi.groundColor.lerpColors(new THREE.Color(0x020502), new THREE.Color(0x1a2a1a), sunFactor);
+
+                // Update butterflies and pollen
+                updateButterfliesAndPollen(time, sunFactor);
 
                 if (fireflies) fireflies.material.uniforms.uNightFactor.value = Math.pow(moonFactor, 0.5);
             }
@@ -771,7 +1368,7 @@
 
         // ============ CONTROLS & PHYSICS ============
         function setupEvents() {
-            document.addEventListener('keydown', (e) => { keys[e.code] = true; if (e.code === 'KeyC' && !player.isSpawning) toggleCamera(); });
+            document.addEventListener('keydown', (e) => { keys[e.code] = true; if (e.code === 'KeyC' && !player.isSpawning) toggleCamera(); if (e.code === 'KeyV' && !player.isSpawning) toggleCinematicMode(); });
             document.addEventListener('keyup', (e) => { keys[e.code] = false; });
             document.addEventListener('mousemove', (e) => {
                 if (!isPointerLocked) return;
@@ -853,6 +1450,36 @@
             document.getElementById('mode').textContent = isFirstPerson ? 'First Person' : 'Third Person';
             document.getElementById('crosshair').classList.toggle('visible', isFirstPerson && isPointerLocked);
             playerModelData.group.visible = !isFirstPerson;
+        }
+
+        // Cinematic mode variables
+        let isCinematicMode = false;
+        let cinematicOrbitAngle = 0;
+        let cinematicHeight = 30;
+        let cinematicDistance = 50;
+        
+        function toggleCinematicMode() {
+            isCinematicMode = !isCinematicMode;
+            document.getElementById('mode').textContent = isCinematicMode ? 'Cinematic' : (isFirstPerson ? 'First Person' : 'Third Person');
+            document.getElementById('crosshair').classList.toggle('visible', isFirstPerson && isPointerLocked);
+            playerModelData.group.visible = true;
+        }
+        
+        function updateCinematicCamera(time, delta) {
+            if (!isCinematicMode) return;
+            
+            // Slow orbit around player
+            cinematicOrbitAngle += delta * 0.2;
+            
+            // Sine wave height
+            cinematicHeight = 20 + Math.sin(time * 0.3) * 15;
+            
+            const targetX = player.position.x + Math.sin(cinematicOrbitAngle) * cinematicDistance;
+            const targetZ = player.position.z + Math.cos(cinematicOrbitAngle) * cinematicDistance;
+            const targetY = player.position.y + cinematicHeight;
+            
+            camera.position.lerp(new THREE.Vector3(targetX, targetY, targetZ), 0.02);
+            camera.lookAt(player.position.x, player.position.y + 2, player.position.z);
         }
 
         function getActiveColliders(px, pz) {
@@ -1006,6 +1633,12 @@
             pm.parts.leftArm.rotation.x = -swing * 0.8; pm.parts.rightArm.rotation.x = swing * 0.8;
 
             document.getElementById('coords').textContent = `X: ${Math.floor(player.position.x)} | Z: ${Math.floor(player.position.z)}`;
+            
+            // Update compass
+            const compassNeedle = document.getElementById('compassNeedle');
+            if (compassNeedle) {
+                compassNeedle.style.transform = `translateX(-50%) rotate(${-player.yaw * 180 / Math.PI}deg)`;
+            }
         }
 
         function updateCamera(time) {
@@ -1013,8 +1646,28 @@
                 camera.position.set(player.position.x + Math.sin(time)*8, player.position.y + 4, player.position.z + Math.cos(time)*8);
                 camera.lookAt(player.position.x, player.position.y + 1, player.position.z);
             } else if (isFirstPerson) {
-                camera.position.copy(player.position); camera.position.y += Math.sin(player.walkCycle) * player.bobAmount;
-                camera.rotation.order = 'YXZ'; camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
+                // Head bob
+                const bobSpeed = player.isSprinting ? 12 : 8;
+                const bobAmount = player.isSprinting ? 0.15 : 0.08;
+                const walkBob = Math.sin(time * bobSpeed) * bobAmount;
+                const strafeBob = Math.cos(time * bobSpeed * 0.5) * bobAmount * 0.5;
+                
+                camera.position.copy(player.position);
+                camera.position.y += Math.sin(player.walkCycle) * player.bobAmount + walkBob;
+                camera.position.x += strafeBob;
+                
+                // Camera tilt while turning
+                const turnSpeed = player.yaw - (player.prevYaw || player.yaw);
+                const targetTilt = THREE.MathUtils.clamp(turnSpeed * 15, -0.15, 0.15);
+                player.cameraTilt = THREE.MathUtils.lerp(player.cameraTilt || 0, targetTilt, 0.1);
+                
+                camera.rotation.order = 'YXZ'; 
+                camera.rotation.y = player.yaw; 
+                camera.rotation.x = player.pitch;
+                camera.rotation.z = -player.cameraTilt;
+                
+                // Store previous yaw
+                player.prevYaw = player.yaw;
             } else {
                 const dist = 6, height = 2.5;
                 camera.position.set(player.position.x + Math.sin(player.yaw) * dist, player.position.y + height, player.position.z + Math.cos(player.yaw) * dist);
@@ -1023,14 +1676,42 @@
         }
 
         function updateMobs(delta) {
+            const sunFactor = scene.userData.sunFactor || 0.5;
+            const isNight = sunFactor < 0.3;
+            
             for (const mob of mobs) {
                 const distToPlayer = Math.sqrt((mob.mesh.position.x - player.position.x)**2 + (mob.mesh.position.z - player.position.z)**2);
+                
+                // Respawn far away if too close to player
                 if (distToPlayer > 150) {
                     const angle = Math.random() * Math.PI * 2;
                     mob.mesh.position.x = player.position.x + Math.sin(angle) * 120; mob.mesh.position.z = player.position.z + Math.cos(angle) * 120;
                 }
+                
+                // Animals sleep at night - reduce movement
+                if (isNight && mob.type !== 'bear') {
+                    mob.stateTimer = 10; // Long idle time at night
+                    continue;
+                }
+                
+                // Flee behavior for deer when player is close
+                if (mob.type === 'deer' && distToPlayer < 20) {
+                    const fleeAngle = Math.atan2(mob.mesh.position.x - player.position.x, mob.mesh.position.z - player.position.z);
+                    mob.targetAngle = fleeAngle;
+                    mob.speed = 8; // Faster when fleeing
+                } else if (mob.type === 'bear') {
+                    mob.speed = 2; // Bears move slowly
+                } else if (mob.type === 'fox') {
+                    mob.speed = 5; // Foxes are moderately fast
+                } else {
+                    mob.speed = 4; // Normal speed
+                }
+                
                 mob.stateTimer -= delta;
-                if (mob.stateTimer <= 0) { mob.targetAngle = Math.random() * Math.PI * 2; mob.stateTimer = 2 + Math.random() * 4; }
+                if (mob.stateTimer <= 0) { 
+                    mob.targetAngle = Math.random() * Math.PI * 2; 
+                    mob.stateTimer = 2 + Math.random() * 4; 
+                }
                 const angleDiff = THREE.MathUtils.euclideanModulo(mob.targetAngle - mob.mesh.rotation.y + Math.PI, Math.PI * 2) - Math.PI;
                 mob.mesh.rotation.y += THREE.MathUtils.clamp(angleDiff, -0.1, 0.1);
                 
@@ -1067,10 +1748,11 @@
             
             updateChunks(); 
             updateEnvironment(time); 
-            // updateAltar(time); // Altar removed
+            updateWeather(time, delta);
 
             if (isPointerLocked) updatePlayer(delta, time);
             updateCamera(time);
+            if (isCinematicMode) updateCinematicCamera(time, delta);
             updateMobs(delta);
             if (!player.isSpawning) updateMinimap();
             
