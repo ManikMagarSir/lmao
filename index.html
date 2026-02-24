@@ -142,7 +142,6 @@
             spawnPoint: { x: 0, z: 0 },
             maxTreesPerChunk: 60, 
             maxRocksPerChunk: 15,
-            maxHutsPerChunk: 2,
             cycleDuration: 600
         };
 
@@ -164,8 +163,8 @@
         const mobs = [];
 
         // Shared Materials & Geometries
-        let terrainMat, treeMat, leavesMat, rockMat, hutMat;
-        let trunkGeo, pineGeo, oakGeo, acaciaGeo, rockGeo, hutGeo;
+        let terrainMat, treeMat, leavesMat, rockMat;
+        let trunkGeo, pineGeo, oakGeo, acaciaGeo, rockGeo;
 
         function updateLoading(percent) {
             const bar = document.getElementById('loader-bar');
@@ -369,15 +368,6 @@
             acaciaGeo = BufferGeometryUtils.mergeGeometries([a1, a2, a3]);
 
             rockGeo = new THREE.DodecahedronGeometry(1, 0);
-
-            // Hut (Small wooden structure with roof)
-            hutMat = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.9 });
-            const hutBase = new THREE.BoxGeometry(3, 2.5, 3);
-            hutBase.translate(0, 1.25, 0);
-            const hutRoof = new THREE.ConeGeometry(2.5, 2, 4);
-            hutRoof.translate(0, 3.5, 0);
-            hutRoof.rotateY(Math.PI / 4);
-            hutGeo = BufferGeometryUtils.mergeGeometries([hutBase, hutRoof]);
         }
 
         function createSpawnAltar() {
@@ -439,10 +429,7 @@
             const rocks = new THREE.InstancedMesh(rockGeo, rockMat, CONFIG.maxRocksPerChunk); rocks.castShadow = true; rocks.receiveShadow = true; rocks.frustumCulled = false; 
             group.add(rocks);
 
-            const huts = new THREE.InstancedMesh(hutGeo, hutMat, CONFIG.maxHutsPerChunk); huts.castShadow = true; huts.receiveShadow = true; huts.frustumCulled = false;
-            group.add(huts);
-
-            return { group, terrain, trunks, pines, oaks, acacias, rocks, huts, colliders: [], active: false };
+            return { group, terrain, trunks, pines, oaks, acacias, rocks, colliders: [], active: false };
         }
 
         function getChunkFromPool() { return chunkPool.length > 0 ? chunkPool.pop() : createChunkObject(); }
@@ -487,7 +474,7 @@
             chunk.terrain.geometry.attributes.normal.needsUpdate = true;
 
             const dummy = new THREE.Object3D(); const leafColor = new THREE.Color();
-            let treeIdx = 0, pineIdx = 0, oakIdx = 0, acaciaIdx = 0, rockIdx = 0, hutIdx = 0;
+            let treeIdx = 0, pineIdx = 0, oakIdx = 0, acaciaIdx = 0, rockIdx = 0;
             chunk.colliders.length = 0;
 
             let rngState = cx * 1000 + cz;
@@ -571,53 +558,12 @@
                     }
                 }
             }
-
-            // Try to spawn huts (very low chance - less common than trees)
-            for (let i = 0; i < 30 && hutIdx < CONFIG.maxHutsPerChunk; i++) {
-                const lx = (rand() - 0.5) * CONFIG.chunkSize;
-                const lz = (rand() - 0.5) * CONFIG.chunkSize;
-                const wx = lx + chunkBaseX;
-                const wz = lz + chunkBaseZ;
-                const wy = getTerrainHeight(wx, wz);
-
-                // Only spawn huts on flat land away from spawn, not in water or mountains
-                if (Math.sqrt((wx - CONFIG.spawnPoint.x)**2 + (wz - CONFIG.spawnPoint.z)**2) < 30) continue;
-                if (wy < CONFIG.waterLevel + 2 || wy > 60) continue;
-
-                const norm = getTerrainNormal(wx, wz);
-                if (norm.y < 0.9) continue; // Must be relatively flat
-
-                // Very low spawn chance (about 3% per attempt)
-                if (rand() > 0.03) continue;
-
-                const r = 2.5; // Hut collision radius
-                let canPlace = true;
-                for (let c of occupied) {
-                    if (Math.hypot(wx - c.x, wz - c.z) < r + c.r) {
-                        canPlace = false;
-                        break;
-                    }
-                }
-
-                if (canPlace) {
-                    const scale = 0.8 + rand() * 0.4;
-                    dummy.position.set(lx, wy, lz);
-                    dummy.rotation.set(0, rand() * Math.PI * 2, 0);
-                    dummy.scale.set(scale, scale, scale);
-                    dummy.updateMatrix();
-                    chunk.huts.setMatrixAt(hutIdx, dummy.matrix);
-                    chunk.colliders.push({ x: wx, y: wy, z: wz, radius: 2.0 * scale, height: 5.0 * scale });
-                    occupied.push({ x: wx, z: wz, r: r });
-                    hutIdx++;
-                }
-            }
             
             chunk.trunks.count = treeIdx; chunk.trunks.instanceMatrix.needsUpdate = true;
             chunk.pines.count = pineIdx; chunk.pines.instanceMatrix.needsUpdate = true; if(chunk.pines.instanceColor) chunk.pines.instanceColor.needsUpdate = true;
             chunk.oaks.count = oakIdx; chunk.oaks.instanceMatrix.needsUpdate = true; if(chunk.oaks.instanceColor) chunk.oaks.instanceColor.needsUpdate = true;
             chunk.acacias.count = acaciaIdx; chunk.acacias.instanceMatrix.needsUpdate = true; if(chunk.acacias.instanceColor) chunk.acacias.instanceColor.needsUpdate = true;
             chunk.rocks.count = rockIdx; chunk.rocks.instanceMatrix.needsUpdate = true;
-            chunk.huts.count = hutIdx; chunk.huts.instanceMatrix.needsUpdate = true;
             
             chunk.active = true;
         }
